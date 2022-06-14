@@ -1,0 +1,113 @@
+import asyncio
+from pyppeteer import launch
+cookie=0
+account = input("请输入账号并回车：")
+password = input("请输入密码并回车：")
+#用pyppeteer登录，获取该账号的cookie
+async def main():
+    browser = await launch()
+    page = await browser.newPage()
+    #反反爬
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.33')
+    await page.evaluateOnNewDocument('() =>{ Object.defineProperties(navigator, { webdriver:{ get: () => false } }) }')
+    #自动登录
+    await page.goto('http://openjudge.cn/auth/login/')
+    element=await page.querySelector("#email")
+    await element.type(account)
+    element=await page.querySelector("#password")
+    await element.type(password)
+    element=await page.querySelector("div.user-login>p:nth-child(2)>button")
+    await element.click()
+    global cookie
+    cookie=await page.cookies()
+    await browser.close()
+asyncio.get_event_loop().run_until_complete(main())
+cookies=""
+for i in cookie:
+    cookies+=i["name"]
+    cookies+="="
+    cookies+=i["value"]
+    cookies+=";"
+cookies=cookies[:-1]
+#获取cookie之后转用requests爬取，速度更快
+import requests,re,html,os
+totle=0#用于记录总共爬取的源代码数量
+#新建tmp的文件夹
+try:
+    os.mkdir("c:\\tmp")
+except:pass
+session=requests.session()
+#反反爬
+header={
+    "User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.63 Safari/537.36 Edg/102.0.1245.33",
+    "Cookie":cookies
+}
+print("---开始爬取答案代码！！---")
+#第一步 进入个人首页
+urlfirst="http://openjudge.cn/"
+f=session.get(urlfirst,headers=header)
+f=f.text
+myf=re.compile(r"<li><a href=\"(.*?)\">个人首页</a></li>")
+myfirst=myf.findall(f)
+url=myfirst[0]
+f=session.get(url,headers=header)
+f=f.text
+#第二步 查看最近的提交
+key=re.compile(r"<a class=\"group-name\" href=\"(.*?)\">")
+group=key.finditer(f)
+for i in group:
+    url=i.group(1)
+    f=session.get(url,headers=header)
+    f=f.text
+    #查看已解决的问题
+    # 1 初步筛选
+    key=re.compile(r"已解决的问题.*?<ul class=\"problem-list\">(?P<done>.*?)</ul>",re.S)
+    done=key.finditer(f)
+    # 2 进一步筛选,并进入已解决的问题
+    for j in done:
+        key = re.compile(r"<li><a href=\"(?P<problem>.*?)\">\d+?</a></li>", re.S)
+        urls=j.group("done").strip()
+        problem=key.finditer(urls)
+        for k in problem:
+            url=k.group("problem")
+            f=session.get(url,headers=header)
+            f=f.text
+            #提取题目的名字，以备后需
+            key=re.compile(r"<title>OpenJudge.+?:(?P<title>.+?)</title>")
+            titles=key.findall(f)
+            title=titles[0]
+            #文件名中可能存在html转义字符，在此进行处理
+            title=html.unescape(title)
+            title=html.unescape(title)
+            #注意文件名字不能包含 \/:*?"<>|
+            listitle=list(title)
+            for y in range(len(listitle)):
+                if listitle[y] in "\/:*?\"<>|":
+                    listitle[y]=""
+            title=""
+            for y in listitle:
+                title+=y
+            print(title)
+            #进入第一个Accept
+            key=re.compile(r"<td class=\"result\"><a href=\"(?P<ans>[^ ]*?)\" class=\"result-right\">Accepted</a></td>",re.S )
+            ans=key.search(f)
+            ans=ans.group("ans")
+            f=session.get(ans,headers=header)
+            f=f.text
+            #提取答案源代码
+            key=re.compile(r"<pre class=\".*?\">(?P<end>.*?)</pre>",re.S)
+            end=key.findall(f)
+            end=end[0]
+            #对html符号转义
+            end=html.unescape(end)
+            #新建文件，并且以题目命名
+            file=open("c:\\tmp"+"\\"+title+".py","w")
+            file.write(end)
+            file.close()
+            totle+=1
+session.close()
+print('''
+---爬取结束，总共获得 "+str(totle)+" 道题目的答案（重复做过的相同题仅存一份答案）！！---
+内容均已保存至 c:\\tmp 文件夹下
+over!!!
+''')
